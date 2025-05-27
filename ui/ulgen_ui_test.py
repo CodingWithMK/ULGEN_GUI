@@ -1,292 +1,300 @@
 import sys
 import cv2
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QFrame
+    QApplication, QMainWindow, QWidget, QLabel, QPushButton,
+    QHBoxLayout, QVBoxLayout, QFrame, QStackedWidget
 )
-from PySide6.QtGui import QFont, QPixmap, QImage, QAction
-from PySide6.QtCore import Qt, QTimer
-
-def make_icon_button(icon_text, color="black"):
-    btn = QPushButton(icon_text)
-    btn.setFont(QFont("Arial", 20, QFont.Bold))
-    btn.setFixedSize(48, 48)
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: #fff;
-            color: {color};
-            border-radius: 16px;
-            border: none;
-        }}
-        QPushButton:hover {{
-            background-color: #ffe082;
-        }}
-    """)
-    return btn
+from PySide6.QtGui import QFont, QPalette, QColor, QImage, QPixmap
+from PySide6.QtCore import Qt, QTimer, QSize
 
 class VideoFeedWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.label = QLabel()
         self.label.setAlignment(Qt.AlignCenter)
+        # 16:9 Format als Mindestgröße (z.B. 640x360)
         self.label.setMinimumSize(640, 360)
         layout = QVBoxLayout(self)
         layout.addWidget(self.label)
-        self.cap = cv2.VideoCapture(0)   # Not: Raspberry Pi kamera için gerekirse 0,1 veya /dev/videoX yapılmalı.
+        
+        # OpenCV VideoCapture initialisieren (0 = Standardkamera)
+        self.cap = cv2.VideoCapture(1)
         if not self.cap.isOpened():
-            self.label.setText("Kamera açılmadı")
+            self.label.setText("Kamera konnte nicht geöffnet werden")
+        
+        # Timer für die Frame-Aktualisierung
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_frame)
-        self.timer.start(30)
+        self.timer.start(30)  # ca. 30ms (33fps)
+    
     def update_frame(self):
         ret, frame = self.cap.read()
         if ret:
+            # Umwandlung von BGR zu RGB
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Erhalte Frame-Größe und berechne 16:9 Ausschnitt
             h, w, ch = frame.shape
-            image = QImage(frame, w, h, w*ch, QImage.Format_RGB888)
+            target_ratio = 16 / 9
+            current_ratio = w / h
+            if current_ratio > target_ratio:
+                # zu breit, horizontal zuschneiden
+                new_width = int(h * target_ratio)
+                offset = (w - new_width) // 2
+                frame = frame[:, offset:offset+new_width]
+            elif current_ratio < target_ratio:
+                # zu hoch, vertikal zuschneiden
+                new_height = int(w / target_ratio)
+                offset = (h - new_height) // 2
+                frame = frame[offset:offset+new_height, :]
+            
+            # Erstelle QImage und passe an die Label-Größe an
+            image = QImage(frame, frame.shape[1], frame.shape[0], 
+                           frame.shape[1]*ch, QImage.Format_RGB888)
+            # Skalierung unter Wahrung des Aspektverhältnisses
             pixmap = QPixmap.fromImage(image).scaled(
                 self.label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.label.setPixmap(pixmap)
+    
     def closeEvent(self, event):
         if self.cap.isOpened():
             self.cap.release()
         event.accept()
 
-class UlgenDashboard(QMainWindow):
+class DashboardWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ÜLGEN DASHBOARD")
-        self.setMinimumSize(1400, 900)
-
-        ### ANA LAYOUT BAŞLANGIÇ ###
+        self.setWindowTitle("Autonomes Fahrzeug - ÜLGEN")
+        self.setMinimumSize(1000, 700)
+        
+        # Haupt-Container (Header + Hauptbereich)
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        layout = QHBoxLayout(central_widget)
-
-        # ---------- SOL MENÜ ----------
-        side_menu = QVBoxLayout()
-        menu_widget = QWidget()
-        menu_widget.setLayout(side_menu)
-        menu_widget.setFixedWidth(80)
-        menu_widget.setStyleSheet("background: #F6F7FB; border-right: 1px solid #e0e0e0;")
-        side_menu.addStretch()
-        side_menu.addWidget(make_icon_button("🧪", "#ffb300"))
-        side_menu.addWidget(make_icon_button("🟦", "#616161"))
-        side_menu.addWidget(make_icon_button("📡", "#8e24aa"))
-        side_menu.addWidget(make_icon_button("🛞", "#0288d1"))
-        side_menu.addStretch()
-        power_btn = make_icon_button("🔋", "#ffb300")
-        side_menu.addWidget(power_btn)
-        side_menu.addSpacing(20)
-        layout.addWidget(menu_widget)
-
-        # ---------- ANA ORTA ALAN ----------
-        main_area = QVBoxLayout()
-        layout.addLayout(main_area)
-
-        ### --- ÜST BAR: Sol başta başlık + Cast/casting bilgisi, ortada bilgi barı --- ###
-        top_bar = QHBoxLayout()
-        # Sol üst köşe: başlık + cast bilgisi
-        cast_icon = QLabel("📡")
-        cast_icon.setFont(QFont("Arial", 19))
-        cast_label = QLabel("Raspberry Pi 5")
-        cast_label.setFont(QFont("Arial", 10, QFont.Bold))
-        cast_label.setStyleSheet("margin-left: 4px; color: #888;")
-        logo_label = QLabel("<b>ÜLGEN</b>")
-        logo_label.setFont(QFont("Arial", 22, QFont.Bold))
-        logo_label.setStyleSheet("color:#ffb300; margin-left: 16px;")
-        left = QVBoxLayout()
-        top_title_row = QHBoxLayout()
-        top_title_row.addWidget(cast_icon)
-        top_title_row.addWidget(logo_label)
-        left.addLayout(top_title_row)
-        left.addWidget(cast_label)
-        left.setAlignment(Qt.AlignLeft)
-        top_bar.addLayout(left)
-        top_bar.addSpacing(14)
-        # ORTADA BİLGİ BAR
-        nav_bar = QHBoxLayout()
-        def info_box(icon, val, desc, color):
-            l = QLabel(f"<span style='font-size:24px;'>{icon}</span> <span style='font-weight:bold;color:{color};font-size:18px'>{val}</span><br><span style='color:#888;font-size:11px;'>{desc}</span>")
-            l.setFixedWidth(90)
-            l.setStyleSheet("text-align:center;")
-            return l
-        nav_bar.addStretch()
-        nav_bar.addWidget(info_box("🌡️","13%","Temp","#ffb300"))
-        nav_bar.addSpacing(16)
-        nav_bar.addWidget(info_box("🔋","73%","Battery","#43a047"))
-        nav_bar.addSpacing(16)
-        nav_bar.addWidget(info_box("🔄","45","Bearings","#f45b69"))
-        nav_bar.addSpacing(16)
-        nav_bar.addWidget(info_box("🛞","2500","Torque","#ab47bc"))
-        nav_bar.addSpacing(16)
-        nav_bar.addWidget(info_box("⚡","10W","Watt","#1976d2"))
-        nav_bar.addStretch()
-        top_bar.addLayout(nav_bar)
-        # Sağ boşluk
-        top_bar.addStretch()
-        main_area.addLayout(top_bar)
-        main_area.addSpacing(12)
-
-        # -- ORTADA ANA GRID ALAN (3 KART: Sol - Orta - Sağ) --
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(32)
-        grid.setVerticalSpacing(18)
-
-        # SOL: Canlı video + status
-        video_card = QFrame()
-        video_card.setStyleSheet("""
-            background: #fff;
-            border-radius: 18px;
-            border: 2px solid #f5f5f8;
+        main_vlayout = QVBoxLayout(central_widget)
+        
+        # Header: Titel "ÜLGEN"
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(10, 10, 10, 10)
+        title_label = QLabel("ÜLGEN")
+        title_label.setFont(QFont("Arial", 24, QFont.Bold))
+        title_label.setStyleSheet("color: white;")
+        header_layout.addWidget(title_label, alignment=Qt.AlignLeft)
+        header.setStyleSheet("background-color: #222;")
+        main_vlayout.addWidget(header)
+        
+        # Hauptbereich: Drei Spalten Layout
+        main_layout = QHBoxLayout()
+        main_vlayout.addLayout(main_layout)
+        
+        # Linkes Panel: Tacho / km/h-Anzeige
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(10, 10, 10, 10)
+        
+        speed_title = QLabel("KM/H")
+        speed_title.setAlignment(Qt.AlignCenter)
+        speed_title.setFont(QFont("Arial", 16, QFont.Bold))
+        speed_title.setStyleSheet("""
+            background-color: #444;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
         """)
-        video_layout = QVBoxLayout(video_card)
-        video_status = QLabel("System idle - Waiting for processing command")
-        video_status.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
-        video_status.setFont(QFont("Arial", 11))
-        self.video_widget = VideoFeedWidget()
-        video_layout.addWidget(self.video_widget)
-        video_layout.addWidget(video_status)
-        grid.addWidget(video_card, 0, 0, 2, 1)
-
-        # ORTA: İşlem/Görev Info
-        middle_card = QFrame()
-        middle_card.setStyleSheet("background:#fff;border-radius:18px;border:2px solid #f5f5f8;")
-        middle_layout = QVBoxLayout(middle_card)
-        middle_layout.setSpacing(8)
-        check_label = QLabel("<b>Check data</b><br><small style='color:#757575;'>Image Processing</small>")
-        check_label.setFont(QFont("Arial", 15, QFont.Bold))
-        check_label.setStyleSheet("color:#232323;")
-        accuracy_label = QLabel("Accuracy Rate")
-        accuracy_label.setFont(QFont("Arial", 12))
-        acc_gauge = QLabel("10%")  # ilerisi gauge olabilir
-        current_task = QLabel("Current Task: <b>none</b>")
-        current_task.setFont(QFont("Arial", 11))
-        current_task.setStyleSheet("color: #616161;")
-        epoch_label = QLabel("Epocs Available: <b style='color:#ab47bc'>false</b>")
-        middle_layout.addWidget(check_label)
-        middle_layout.addWidget(accuracy_label)
-        middle_layout.addWidget(acc_gauge)
-        middle_layout.addWidget(current_task)
-        middle_layout.addWidget(epoch_label)
-        middle_layout.addStretch()
-        grid.addWidget(middle_card, 0, 1)
-
-        # ALT ORTA: Datasets (örnek)
-        datasets_card = QFrame()
-        datasets_card.setStyleSheet("background:#fff; border-radius:18px; border:2px solid #f5f5f8;")
-        dataset_layout = QVBoxLayout(datasets_card)
-        dataset_layout.setAlignment(Qt.AlignTop)
-        dataset_layout.addWidget(QLabel("DATASETS<br><b>Mode:</b> Performance<br><b>Intake:</b> Neutral<br><b>Frequency:</b> 10.7Hz"))
-        srcs_card = QFrame()
-        srcs_card.setStyleSheet("background:#f5f5fa; border-radius:18px;")
-        srcs_layout = QHBoxLayout(srcs_card)
-        srcs_layout.addWidget(QLabel("SOURCES<br><b>ACTIVE</b>"))
-        dataset_layout.addWidget(srcs_card)
-        grid.addWidget(datasets_card, 1, 1)
-
-        # SAĞ: Analyze Card --- GÜNCELLEME BURADA YAPILDI ------
-        analyze_card = QFrame()
-        analyze_card.setStyleSheet("background:#fff; border-radius:18px; border:2px solid #f5f5f8;")
-        analyze_layout = QVBoxLayout(analyze_card)
-        preview_img = QLabel()
-        preview_img.setPixmap(QPixmap(320, 160))
-        preview_img.setStyleSheet("background:#ebeefb; border-radius:8px;")
-        preview_img.setFixedHeight(160)
-        analyze_layout.addWidget(preview_img)
-        # YENİ: Sadece simgeli butonlar!
-        eject_btn = QPushButton("⏏ Eject")
-        upload_btn = QPushButton("⏫ Upload")
-        cnn_btn = QPushButton("🔎 CNN")
-        settings_btn = QPushButton("⚙")
-        analyze_btn = QPushButton(f"▶  Analyze Image")
-        # gradient stilleri
-        eject_btn.setStyleSheet("""
-        QPushButton {
-            background: linear-gradient(90deg, #d500f9, #448aff);
-            color: white; border-radius:8px; font-weight: bold;padding:13px;
-        }
+        
+        current_speed = QLabel("0")
+        current_speed.setAlignment(Qt.AlignCenter)
+        current_speed.setFont(QFont("Arial", 24, QFont.Bold))
+        current_speed.setStyleSheet("""
+            background-color: #222;
+            color: #00FF00;
+            padding: 20px;
+            border-radius: 5px;
         """)
-        upload_btn.setStyleSheet("""
-        QPushButton {
-            background: #ede7f6;
-            color: #8e24aa; border-radius:8px; font-weight:bold;padding:8px 26px;
-        }
-        QPushButton:hover {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c4dff, stop:1 #536dfe);
-            color:white;
-        }
+        
+        left_layout.addWidget(speed_title)
+        left_layout.addWidget(current_speed)
+        left_layout.addStretch()
+        
+        # Mittleres Panel: Kameraansicht mit QStackedWidget
+        center_panel = QWidget()
+        center_layout = QVBoxLayout(center_panel)
+        center_layout.setContentsMargins(10, 10, 10, 10)
+        
+        self.camera_stack = QStackedWidget()
+        
+        # Normale Kamera (Echtzeitvideo via OpenCV)
+        normal_cam_widget = VideoFeedWidget()
+        
+        # Thermalkamera (Platzhalter)
+        thermal_cam = QFrame()
+        thermal_cam.setStyleSheet("""
+            background-color: #aa4444;
+            border: 2px solid #330000;
+            border-radius: 10px;
         """)
-        cnn_btn.setStyleSheet("""
-        QPushButton {
-            background: #ede7f6;
-            color: #1a237e; border-radius:8px; font-weight:bold;padding:8px 26px;
-        }
-        QPushButton:hover {
-            background: qlineargradient(x1::0, y1:0, x2:1, y2:0, stop:0 #00897b, stop:1 #43a047);
-            color:white;
-        }
+        thermal_cam.setMinimumSize(640, 360)
+        
+        # Spektralkamera (Platzhalter)
+        spectrum_cam = QFrame()
+        spectrum_cam.setStyleSheet("""
+            background-color: #4444aa;
+            border: 2px solid #000033;
+            border-radius: 10px;
         """)
-        settings_btn.setStyleSheet("""
-        QPushButton {
-            background: #ede7f6;
-            color: #757575; border-radius:8px; font-weight:bold;padding:8px 22px;
-        }
-        QPushButton:hover {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ffd600, stop:1 #ffc107);
-            color:#424242;
-        }
+        spectrum_cam.setMinimumSize(640, 360)
+        
+        self.camera_stack.addWidget(normal_cam_widget)   # Index 0: Echtzeitvideo
+        self.camera_stack.addWidget(thermal_cam)           # Index 1
+        self.camera_stack.addWidget(spectrum_cam)            # Index 2
+        
+        center_layout.addWidget(self.camera_stack)
+        
+        # Button-Leiste für Kameraansichten
+        button_widget = QWidget()
+        button_layout = QHBoxLayout(button_widget)
+        button_layout.setContentsMargins(0, 10, 0, 0)
+        
+        normal_button = QPushButton("Normale Kamera")
+        thermal_button = QPushButton("Thermalkamera")
+        spectrum_button = QPushButton("Spektralkamera")
+        
+        normal_button.clicked.connect(lambda: self.camera_stack.setCurrentIndex(0))
+        thermal_button.clicked.connect(lambda: self.camera_stack.setCurrentIndex(1))
+        spectrum_button.clicked.connect(lambda: self.camera_stack.setCurrentIndex(2))
+        
+        button_layout.addWidget(normal_button)
+        button_layout.addWidget(thermal_button)
+        button_layout.addWidget(spectrum_button)
+        
+        center_layout.addWidget(button_widget)
+        
+        # Rechtes Panel: Sensorwerte und Status
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Batteriestatus
+        battery_title = QLabel("Batterie")
+        battery_title.setAlignment(Qt.AlignCenter)
+        battery_title.setFont(QFont("Arial", 14, QFont.Bold))
+        battery_title.setStyleSheet("""
+            background-color: #444;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
         """)
-        analyze_btn.setStyleSheet("""
-        QPushButton {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #d500f9, stop:1 #2979ff);
-            color: white; border-radius:8px; font-weight: bold; padding:14px 28px;
-            font-size: 16px;
-            margin-top:12px;
-            margin-bottom:8px;
-        }
-        QPushButton:hover {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2979ff, stop:1 #d500f9);
-        }
+        
+        battery_value = QLabel("80%")
+        battery_value.setAlignment(Qt.AlignCenter)
+        battery_value.setFont(QFont("Arial", 20, QFont.Bold))
+        battery_value.setStyleSheet("""
+            background-color: #222;
+            color: #FFD700;
+            padding: 10px;
+            border-radius: 5px;
         """)
-
-        btn_bar = QHBoxLayout()
-        btn_bar.addWidget(upload_btn)
-        btn_bar.addWidget(cnn_btn)
-        btn_bar.addWidget(settings_btn)
-        analyze_layout.addWidget(eject_btn)
-        analyze_layout.addLayout(btn_bar)
-        analyze_layout.addWidget(analyze_btn)
-        grid.addWidget(analyze_card, 0, 2, 2, 1)
-
-        # --- GRID ANA ALANA EKLENİYOR ---
-        main_area.addLayout(grid)
-        main_area.addStretch()
-
-        # --- ALT BİLDİRİM BAR ---
-        issue_card = QFrame()
-        issue_card.setStyleSheet("background:qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff8373, stop:1 #ffd600); color:white; border-radius:13px;")
-        issue_card.setFixedHeight(36)
-        issue_label = QLabel("1 Issue")
-        issue_label.setFont(QFont("Arial", 12, QFont.Bold))
-        issue_card_layout = QHBoxLayout(issue_card)
-        issue_card_layout.addWidget(issue_label)
-        issue_card_layout.addSpacing(10)
-        issue_card_layout.addWidget(QLabel("❌"))
-        main_area.addWidget(issue_card)
-
-        # --- GENEL PENCERE ARKAPLAN STİLİ ---
+        
+        # Sensordaten (Beispiel: Lidar, Radar, Kamera)
+        sensor_title = QLabel("Sensoren")
+        sensor_title.setAlignment(Qt.AlignCenter)
+        sensor_title.setFont(QFont("Arial", 14, QFont.Bold))
+        sensor_title.setStyleSheet("""
+            background-color: #444;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+        """)
+        
+        sensor_value = QLabel("Lidar: OK\nRadar: OK\nKamera: OK")
+        sensor_value.setAlignment(Qt.AlignCenter)
+        sensor_value.setFont(QFont("Arial", 12))
+        sensor_value.setStyleSheet("""
+            background-color: #222;
+            color: #FFF;
+            padding: 10px;
+            border-radius: 5px;
+        """)
+        
+        # Magnetometer-Daten
+        magnetometer_title = QLabel("Magnetometer")
+        magnetometer_title.setAlignment(Qt.AlignCenter)
+        magnetometer_title.setFont(QFont("Arial", 14, QFont.Bold))
+        magnetometer_title.setStyleSheet("""
+            background-color: #444;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+        """)
+        
+        magnetometer_value = QLabel("X: 0.0\nY: 0.0\nZ: 0.0")
+        magnetometer_value.setAlignment(Qt.AlignCenter)
+        magnetometer_value.setFont(QFont("Arial", 12))
+        magnetometer_value.setStyleSheet("""
+            background-color: #222;
+            color: #FFF;
+            padding: 10px;
+            border-radius: 5px;
+        """)
+        
+        # Systemstatus
+        system_title = QLabel("Systemstatus")
+        system_title.setAlignment(Qt.AlignCenter)
+        system_title.setFont(QFont("Arial", 14, QFont.Bold))
+        system_title.setStyleSheet("""
+            background-color: #444;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+        """)
+        
+        system_value = QLabel("Alles in Ordnung")
+        system_value.setAlignment(Qt.AlignCenter)
+        system_value.setFont(QFont("Arial", 12))
+        system_value.setStyleSheet("""
+            background-color: #222;
+            color: #0F0;
+            padding: 10px;
+            border-radius: 5px;
+        """)
+        
+        # Hinzufügen der Widgets zum rechten Layout
+        right_layout.addWidget(battery_title)
+        right_layout.addWidget(battery_value)
+        right_layout.addWidget(sensor_title)
+        right_layout.addWidget(sensor_value)
+        right_layout.addWidget(magnetometer_title)
+        right_layout.addWidget(magnetometer_value)
+        right_layout.addWidget(system_title)
+        right_layout.addWidget(system_value)
+        right_layout.addStretch()
+        
+        # Zusammenbau des Hauptlayouts
+        main_layout.addWidget(left_panel, 1)
+        main_layout.addWidget(center_panel, 3)
+        main_layout.addWidget(right_panel, 1)
+        
+        # Gesamtstil des Fensters
         self.setStyleSheet("""
-            QMainWindow { background: #F6F7FB; }
-            QLabel { color: #111; }
+            QMainWindow {
+                background-color: #333;
+            }
             QPushButton {
-                font-weight: bold;
+                padding: 10px;
+                background-color: #555;
+                color: white;
                 border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #777;
             }
         """)
 
-if __name__ == "__main__":
+def main():
     app = QApplication(sys.argv)
-    window = UlgenDashboard()
+    window = DashboardWindow()
     window.show()
     sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
